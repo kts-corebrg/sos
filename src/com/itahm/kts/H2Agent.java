@@ -1,4 +1,4 @@
-package com.itahm.nms;
+package com.itahm.kts;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -27,12 +27,15 @@ import org.snmp4j.smi.Variable;
 
 import com.itahm.json.JSONArray;
 import com.itahm.json.JSONObject;
-import com.itahm.lang.KR;
+import com.itahm.kts.SeedNode.Arguments;
+import com.itahm.kts.SeedNode.Protocol;
 import com.itahm.nms.SmartSearch.Profile;
+import com.itahm.nms.Commander;
+import com.itahm.nms.NodeEventReceivable;
+import com.itahm.nms.SmartSearch;
+import com.itahm.nms.Batch;
 import com.itahm.nms.Bean.*;
 import com.itahm.nms.node.PDUManager;
-import com.itahm.nms.node.SeedNode.Arguments;
-import com.itahm.nms.node.SeedNode.Protocol;
 import com.itahm.nms.parser.HRProcessorLoad;
 import com.itahm.nms.parser.HRStorageMemory;
 import com.itahm.nms.parser.HRStorageUsed;
@@ -193,7 +196,7 @@ public class H2Agent implements Commander, NodeEventReceivable, Listener, Closea
 		try (Connection c = coreConnPool.getConnection()) {
 			c.setAutoCommit(false);
 			
-			try {				
+			try {
 				/**
 				 * CONFIG
 				 **/
@@ -426,6 +429,20 @@ public class H2Agent implements Commander, NodeEventReceivable, Listener, Closea
 				}
 				/**END**/
 				
+				/**
+				 * MEMO
+				 */
+				try (Statement stmt = c.createStatement()) {
+					stmt.executeUpdate("CREATE TABLE IF NOT EXISTS memo"+
+						" (event_id BIGINT PRIMARY KEY"+
+						", username VARCHAR NOT NULL"+
+						", date BIGINT NOT NULL"+
+						", memo VARCHAR NOT NULL DEFAULT ''"+
+						", FOREIGN KEY (event_id) REFERENCES event(event_id)"+
+						");");
+				}
+				/**END**/
+				
 				c.commit();
 			} catch(Exception e) {
 				c.rollback();
@@ -576,7 +593,31 @@ public class H2Agent implements Commander, NodeEventReceivable, Listener, Closea
 		
 		System.out.format("Database parsed in %dms.\n", System.currentTimeMillis() - start);
 	}
-
+/*
+	@Override
+	public boolean addBGroup(JSONObject bgroup) {
+		try (Connection c = this.coreConnPool.getConnection()) {
+			try (PreparedStatement pstmt = c.prepareStatement("INSERT INTO bgroup (parent, name)"+
+				" VALUES(?, ?);")) {
+				if (bgroup.has("parent")) {
+					pstmt.setLong(1, bgroup.getLong("parent"));
+				} else {
+					pstmt.setNull(1, Types.NULL);
+				}
+				
+				pstmt.setString(2, bgroup.getString("name"));
+				
+				pstmt.executeUpdate();
+			}
+			
+			return true;
+		} catch (SQLException sqle) {
+			sqle.printStackTrace();
+		}
+		
+		return false;
+	}
+	*/
 	@Override
 	public boolean addBranch(JSONObject branch) {
 		try (Connection c = this.coreConnPool.getConnection()) {
@@ -715,7 +756,7 @@ public class H2Agent implements Commander, NodeEventReceivable, Listener, Closea
 						JSONObject branch = node.getJSONObject("branch");
 						
 						try (PreparedStatement pstmt = c.prepareStatement("INSERT INTO branch"+
-							" (id, adddress, subaddr, phone, lat, lng)"+
+							" (id, address, subaddr, phone, lat, lng)"+
 							" values (?, ?, ?, ?, ?, ?);")) {
 							pstmt.setLong(1, this.nextNodeID);
 							pstmt.setString(2, branch.getString("address"));
@@ -729,7 +770,7 @@ public class H2Agent implements Commander, NodeEventReceivable, Listener, Closea
 							}
 							
 							if (branch.has("lng")) {
-								pstmt.setString(5, branch.getString("lng"));
+								pstmt.setString(6, branch.getString("lng"));
 							} else {
 								pstmt.setNull(6, Types.NULL);
 							}
@@ -840,7 +881,56 @@ public class H2Agent implements Commander, NodeEventReceivable, Listener, Closea
 	public JSONObject getConfig() {		
 		return this.config.getJSONObject();
 	}
-
+/*
+	@Override
+	public JSONObject getBGroup() {
+		try (Connection c = this.coreConnPool.getConnection()) {
+			try (Statement stmt = c.createStatement()) {
+				JSONObject groupData = new JSONObject();
+				
+				try (ResultSet rs = stmt.executeQuery("SELECT id, parent, name"+
+					" FROM bgroup;")) {
+					while (rs.next()) {
+						groupData.put(Long.toString(rs.getLong(1)), new JSONObject()
+							.put("id", rs.getLong(1))
+							.put("parent", rs.getLong(2))
+							.put("name", rs.getString(3)));
+					}
+				}
+				
+				return groupData;
+			}
+		} catch (SQLException sqle) {
+			sqle.printStackTrace();
+		}
+		
+		return null;
+	}
+	
+	@Override
+	public JSONObject getBGroup(long id) {
+		try (Connection c = this.coreConnPool.getConnection()) {
+			try (PreparedStatement pstmt = c.prepareStatement("SELECT parent, name" + 
+					" FROM bgroup"+ 
+					" WHERE id=?;")) {
+				pstmt.setLong(1, id);
+				
+				try (ResultSet rs = pstmt.executeQuery()) {
+					if (rs.next()) {
+						return new JSONObject()
+							.put("id", id)
+							.put("parent", rs.getLong(1))
+							.put("name", rs.getString(2));
+					}
+				}
+			}
+		} catch (SQLException sqle) {
+			sqle.printStackTrace();
+		}
+		
+		return null;
+	}
+	*/
 	@Override
 	public JSONObject getBranch() {
 		try (Connection c = this.coreConnPool.getConnection()) {
@@ -1004,15 +1094,18 @@ public class H2Agent implements Commander, NodeEventReceivable, Listener, Closea
 		calendar.set(Calendar.MILLISECOND, 0);
 	
 		try (Connection c = this.dataConnPool.getConnection()) {
-			try (PreparedStatement pstmt = c.prepareStatement("SELECT id, timestamp, origin, level, message, name, event_id"+
-				" FROM EVENT"+
-				" WHERE date=?;")) {
+			try (PreparedStatement pstmt = c.prepareStatement("SELECT id, timestamp, origin, level, message, name, e.event_id, memo, m.date, username"+
+				" FROM EVENT AS e"+
+				" LEFT JOIN memo AS m"+
+				" ON e.event_id=m.event_id"+
+				" WHERE e.date=?;")) {
 				pstmt.setLong(1, calendar.getTimeInMillis());
 				
 				try (ResultSet rs = pstmt.executeQuery()) {
 					JSONObject
 						eventData = new JSONObject(),
 						event;
+					String memo;
 					
 					while(rs.next()) {
 						event = new JSONObject()
@@ -1023,6 +1116,15 @@ public class H2Agent implements Commander, NodeEventReceivable, Listener, Closea
 							.put("message", rs.getString(5))
 							.put("name", rs.getString(6))
 							.put("eventID", rs.getLong(7));
+						
+						memo = rs.getString(8);
+						
+						if (!rs.wasNull()) {
+							event.put("memo", new JSONObject()
+								.put("edit", rs.getLong(9))
+								.put("value", memo)
+								.put("username", rs.getString(10)));
+						}
 						
 						eventData.put(Long.toString(rs.getLong(7)), event);
 					}
@@ -1240,6 +1342,8 @@ public class H2Agent implements Commander, NodeEventReceivable, Listener, Closea
 						" FROM node AS n"+
 						" LEFT JOIN monitor AS m"+
 						" ON n.id=m.id;")) {
+					String ip;
+					
 					while (rs.next()) {
 						id = rs.getLong(1);
 						
@@ -1254,8 +1358,10 @@ public class H2Agent implements Commander, NodeEventReceivable, Listener, Closea
 							node.put("type", rs.getString(3));
 						}
 						
-						if (rs.getString(4) != null) {
-							node.put("ip", rs.getString(4));
+						ip = rs.getString(4);
+						
+						if (ip != null) {
+							node.put("ip", ip);
 						}
 						
 						if (rs.getString(5) != null) {
@@ -1263,7 +1369,17 @@ public class H2Agent implements Commander, NodeEventReceivable, Listener, Closea
 						}
 						
 						if (rs.getString(6) != null) {
-							node.put("protocol", rs.getString(6));
+							String protocol = rs.getString(6);
+							
+							node.put("protocol", protocol);
+							
+							if (protocol.equalsIgnoreCase("ka") && ip != null) {
+								KeepAlive.Data ka = KeepAlive.map.get(ip);
+									
+								if (ka != null && ka.address != null) {
+									node.put("address", ka.address);
+								}
+							}
 						}
 						
 						status = rs.getBoolean(7);
@@ -1317,6 +1433,8 @@ public class H2Agent implements Commander, NodeEventReceivable, Listener, Closea
 				
 				try (ResultSet rs = pstmt.executeQuery()) {
 					if (rs.next()) {
+						String ip = rs.getString(4);
+						
 						node.put("id", rs.getLong(1));
 						
 						if (rs.getString(2) != null) {
@@ -1327,7 +1445,7 @@ public class H2Agent implements Commander, NodeEventReceivable, Listener, Closea
 							node.put("type", rs.getString(3));
 						}
 						
-						if (rs.getString(4) != null) {
+						if (ip != null) {
 							node.put("ip", rs.getString(4));
 						}
 						
@@ -1336,7 +1454,17 @@ public class H2Agent implements Commander, NodeEventReceivable, Listener, Closea
 						}
 						
 						if (rs.getString(6) != null) {
-							node.put("protocol", rs.getString(6));
+							String protocol = rs.getString(6);
+							
+							node.put("protocol", protocol);
+							
+							if (protocol.equalsIgnoreCase("ka") && ip != null) {
+								KeepAlive.Data ka = KeepAlive.map.get(ip);
+									
+								if (ka != null && ka.address != null) {
+									node.put("address", ka.address);
+								}
+							}
 						}
 						
 						status = rs.getBoolean(7);
@@ -2056,7 +2184,7 @@ public class H2Agent implements Commander, NodeEventReceivable, Listener, Closea
 							}
 						} else {
 							sendEvent(new Event(Event.CHANGE, id, Event.NORMAL,
-								String.format("%s %s", rule.name.toUpperCase(), KR.INFO_SNMP_CHANGE)));
+								String.format("%s SNMP 상태 변화 감지.", rule.name.toUpperCase())));
 						}
 						
 					}
@@ -2101,6 +2229,15 @@ public class H2Agent implements Commander, NodeEventReceivable, Listener, Closea
 			}
 			else {
 				sendEvent(new Event(Event.REGISTER, id, Event.WARNING, "TCP 등록 실패."));
+			}
+			
+			break;
+		case KA:
+			if ((Boolean)result && registerKANode(id, ip)) {
+				sendEvent(new Event(Event.REGISTER, id, Event.NORMAL, "KA 등록 성공."));
+			}
+			else {
+				sendEvent(new Event(Event.REGISTER, id, Event.WARNING, "KA 등록 실패."));
 			}
 			
 			break;
@@ -2325,6 +2462,32 @@ public class H2Agent implements Commander, NodeEventReceivable, Listener, Closea
 		return false;
 	}
 	
+	private boolean registerKANode(long id, String key) {
+		if (!this.statusMap.containsKey(id)) {
+			try (Connection c = this.coreConnPool.getConnection()) {
+				try (PreparedStatement pstmt = c.prepareStatement("INSERT INTO monitor (id, ip, protocol)"+
+					" VALUES (?, ?, 'ka');")) {
+					pstmt.setLong(1, id);
+					pstmt.setString(2, key);
+					
+					pstmt.executeUpdate();
+				}
+				
+				this.nodeManager.createNode(id, key, "ka");
+				
+				this.statusMap.put(id, true);
+				
+				KeepAlive.map.put(key, new KeepAlive.Data());
+				
+				return true;
+			} catch (Exception e) {
+				e.printStackTrace();
+			}
+		}
+		
+		return false;	
+	}
+	
 	private boolean registerTCPNode(long id, String ip) {
 		if (this.statusMap.containsKey(id)) {
 			return false;
@@ -2350,7 +2513,7 @@ public class H2Agent implements Commander, NodeEventReceivable, Listener, Closea
 		
 		return false;
 	}
-	
+
 	@Override
 	public boolean removeBranch(long id) {
 		try (Connection c = this.coreConnPool.getConnection()) {
@@ -2453,23 +2616,23 @@ public class H2Agent implements Commander, NodeEventReceivable, Listener, Closea
 				}
 				
 				try (PreparedStatement pstmt = c.prepareStatement("DELETE"+
-					" FROM node"+
-					" WHERE id=?;")) {
-					pstmt.setLong(1, id);
-					
-					pstmt.executeUpdate();
-				}
-				
-				try (PreparedStatement pstmt = c.prepareStatement("DELETE"+
 					" FROM monitor"+
 					" WHERE id=?;")) {
 					pstmt.setLong(1, id);
 					
 					pstmt.executeUpdate();
 				}
-				
+			
 				try (PreparedStatement pstmt = c.prepareStatement("DELETE"+
 					" FROM branch"+
+					" WHERE id=?;")) {
+					pstmt.setLong(1, id);
+					
+					pstmt.executeUpdate();
+				}
+			
+				try (PreparedStatement pstmt = c.prepareStatement("DELETE"+
+					" FROM node"+
 					" WHERE id=?;")) {
 					pstmt.setLong(1, id);
 					
@@ -2747,7 +2910,28 @@ public class H2Agent implements Commander, NodeEventReceivable, Listener, Closea
 			sqle.printStackTrace();
 		}
 	}
-	
+	/*
+	@Override
+	public boolean setBGroup(long id, JSONObject bgroup) {
+		try (Connection c = this.coreConnPool.getConnection()) {
+			try (PreparedStatement pstmt = c.prepareStatement("UPDATE bgroup"+
+				" SET parent=?, name=?"+
+				" WHERE id=?;")) {
+				pstmt.setLong(1, bgroup.getLong("parent"));
+				pstmt.setString(2, bgroup.getString("name"));
+				pstmt.setLong(3, id);
+				
+				pstmt.executeUpdate();
+			}
+			
+			return true;
+		} catch (SQLException sqle) {
+			sqle.printStackTrace();
+		}
+		
+		return false;
+	}
+		*/
 	@Override
 	public boolean setBranch(long id, JSONObject branch) {
 		try (Connection c = this.coreConnPool.getConnection()) {
@@ -2913,6 +3097,29 @@ public class H2Agent implements Commander, NodeEventReceivable, Listener, Closea
 	}
 
 	@Override
+	public boolean setMemo(long event, JSONObject memo) {
+		try (Connection c = this.dataConnPool.getConnection()) {
+			try (PreparedStatement pstmt = c.prepareStatement("MERGE INTO memo"+
+				" (event_id, username, date, memo)"+
+				" KEY (event_id)"+
+				" VALUES(?, ?, ?, ?);")) {
+				pstmt.setLong(1, event);
+				pstmt.setString(2, memo.getString("username"));
+				pstmt.setLong(3, memo.getLong("edit"));
+				pstmt.setString(4, memo.getString("value"));
+				
+				pstmt.executeUpdate();
+				
+				return true;
+			}
+		} catch (SQLException sqle) {
+			sqle.printStackTrace();
+		}
+		
+		return false;
+	}
+	
+	@Override
 	public boolean setMonitor(long id, String ip, String protocol) {
 		if (protocol == null) {
 			try (Connection c = this.coreConnPool.getConnection()) {
@@ -2958,6 +3165,7 @@ public class H2Agent implements Commander, NodeEventReceivable, Listener, Closea
 				break;
 			case "ICMP":
 			case "TCP":
+			case "KA":
 				this.nodeManager.testNode(id, ip, protocol);
 				
 				break;
@@ -3404,6 +3612,8 @@ public class H2Agent implements Commander, NodeEventReceivable, Listener, Closea
 						
 						try {
 							switch(rs.getString(3).toUpperCase()) {
+							case "KA":
+								KeepAlive.map.put(rs.getString(2), new KeepAlive.Data());
 							case "ICMP":
 							case "TCP":
 								this.nodeManager.createNode(

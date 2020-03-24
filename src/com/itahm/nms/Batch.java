@@ -16,7 +16,6 @@ import java.util.concurrent.TimeUnit;
 
 import org.h2.jdbcx.JdbcConnectionPool;
 
-import com.itahm.lang.KR;
 import com.itahm.nms.Bean.Rule;
 import com.itahm.nms.Bean.Value;
 import com.itahm.util.Util;
@@ -132,7 +131,7 @@ public class Batch extends Timer {
 						FileTime ft = Files.getLastModifiedTime(p);
 						
 						if (millis > ft.toMillis()) {
-							System.out.println(String.format("%s %s", KR.INFO_REMOVE_DB, p.getFileName()));
+							System.out.println(String.format("Clear database %s", p.getFileName()));
 							
 							Files.delete(p);
 						}

@@ -1,4 +1,4 @@
-package com.itahm.nms.node;
+package com.itahm.kts;
 
 import java.io.IOException;
 import java.net.InetAddress;
@@ -27,7 +27,7 @@ public class SeedNode implements Runnable, Listenable {
 	public static final int TIMEOUT = 5000;
 	
 	public enum Protocol {
-		ICMP, TCP, SNMP;
+		ICMP, TCP, SNMP, KA;
 	}
 	
 	interface Testable {
@@ -219,6 +219,18 @@ public class SeedNode implements Runnable, Listenable {
 					return true;
 				}
 			};
+			
+			break;
+		case KA:
+			this.target = new Testable() {
+				
+				@Override
+				public void test() {
+					fireEvent(protocol, true);
+				}
+			};
+			
+			break;
 		}
 		
 		this.thread.start();

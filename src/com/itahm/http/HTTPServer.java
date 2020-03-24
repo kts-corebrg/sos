@@ -107,6 +107,12 @@ public abstract class HTTPServer implements Runnable, Closeable {
 		return connections.size();
 	}
 	
+	protected void doGet(Request connection, Response response) {
+	}
+	
+	protected void doPost(Request connection, Response response) {
+	}
+	
 	@Override
 	public void close() throws IOException {
 		synchronized (this.closed) {
@@ -188,7 +194,4 @@ public abstract class HTTPServer implements Runnable, Closeable {
 			ioe.printStackTrace();
 		}
 	}
-	
-	abstract public void doPost(Request connection, Response response);	
-	abstract public void doGet(Request connection, Response response);
 }

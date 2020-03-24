@@ -14,7 +14,7 @@ import com.itahm.http.Request;
 import com.itahm.http.Response;
 import com.itahm.json.JSONException;
 import com.itahm.json.JSONObject;
-import com.itahm.lang.KR;
+import com.itahm.kts.KeepAlive;
 import com.itahm.service.NMS;
 import com.itahm.service.Serviceable;
 import com.itahm.service.SignIn;
@@ -38,12 +38,15 @@ public class ITAhM extends HTTPServer {
 		
 		System.out.format("ITAhM HTTP Server started with TCP %d.\n", tcp);
 		
-		root = path.resolve("data");
+		this.root = path;
+		
+		Path root = path.resolve("data");
 		
 		if (!Files.isDirectory(root)) {
 			Files.createDirectories(root);
 		}
 		
+		services.put("KEEPALIVE", new KeepAlive(root));
 		services.put("SIGNIN", new SignIn(root));
 		services.put("NMS", new NMS.Builder(root)
 			//.license()
@@ -79,18 +82,11 @@ public class ITAhM extends HTTPServer {
 	
 	@Override
 	public void doPost(Request request, Response response) {
-		String origin = request.getHeader(com.itahm.http.Connection.Header.ORIGIN.toString());
-		
-		if (origin != null) {
-			response.setHeader("Access-Control-Allow-Origin", origin);
-			response.setHeader("Access-Control-Allow-Credentials", "true");
-		}
-
 		try {
 			JSONObject data = new JSONObject(new String(request.read(), StandardCharsets.UTF_8.name()));
 			
 			if (!data.has("command")) {
-				throw new JSONException(KR.ERROR_CMD_NOT_FOUND);
+				throw new JSONException("Command not found.");
 			}
 			
 			Serviceable service;
@@ -171,7 +167,7 @@ public class ITAhM extends HTTPServer {
 		}
 	}
 	
-	public static void main(String[] args) throws Exception {
+	public static void main(String... args) throws Exception {
 		Path root = null;
 		String ip = "0.0.0.0";
 		int tcp = 2014;

@@ -6,26 +6,20 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Date;
-import java.util.Timer;
-import java.util.TimerTask;
-
-import javax.mail.MessagingException;
 
 import com.itahm.http.Request;
 import com.itahm.http.Response;
 import com.itahm.json.JSONException;
 import com.itahm.json.JSONObject;
-import com.itahm.lang.KR;
+import com.itahm.kts.H2Agent;
 import com.itahm.nms.Commander;
-import com.itahm.nms.H2Agent;
 import com.itahm.smtp.SMTP;
 import com.itahm.util.Listener;
 import com.itahm.util.Util;
 
 public class NMS implements Serviceable, Listener {
 
-	private final static String VERSION = "CeMS v1.0";
+	private final static String VERSION = "SOS v1.3";
 	private Commander agent;
 	private final SMTP smtpServer = new SMTP();
 	private final Path root;
@@ -38,23 +32,6 @@ public class NMS implements Serviceable, Listener {
 		root = builder.root;
 		expire = builder.expire;
 		limit = builder.limit;
-		
-		if (expire > 0) {
-			new Timer("Expire Scheduler").schedule(new TimerTask() {
-
-				@Override
-				public void run() {
-					try {
-						// TODO
-						System.out.println(KR.ERROR_LICENSE_EXPIRE);
-						
-						agent.close();
-					} catch (IOException ioe) {
-						ioe.printStackTrace();
-					}
-					
-				}}, new Date(expire));
-		}
 	}
 	
 	public static class Builder {
@@ -69,7 +46,7 @@ public class NMS implements Serviceable, Listener {
 		
 		public Builder license(String mac) {
 			if (!Util.isValidAddress(mac)) {
-				System.out.println(KR.ERROR_LICENSE_MAC);
+				System.out.println("Invalid license address (MAC).");
 				
 				licensed = false;
 			}
@@ -227,11 +204,7 @@ public class NMS implements Serviceable, Listener {
 					
 					list.toArray(sa);
 					
-					try {
-						this.smtpServer.send(event.getString("message"), sa);
-					} catch (MessagingException me) {
-						me.printStackTrace();
-					}
+					this.smtpServer.send(event.getString("message"), sa);
 				}
 				
 				this.event = event.toString().getBytes(StandardCharsets.UTF_8.name());
@@ -299,6 +272,12 @@ public class NMS implements Serviceable, Listener {
 	
 	private void add(JSONObject request, Response response) {
 		switch(request.getString("target").toUpperCase()) {
+		case "BRANCH":
+			if (!this.agent.addBranch(request.getJSONObject("branch"))) {
+				response.setStatus(Response.Status.SERVERERROR);
+			}
+			
+			break;
 		case "ICON":
 			if (this.agent.addIcon(request.getString("type"), request.getJSONObject("icon")) == null) {
 				response.setStatus(Response.Status.CONFLICT);
@@ -348,6 +327,12 @@ public class NMS implements Serviceable, Listener {
 	
 	private void set(JSONObject request, Response response) {
 		switch(request.getString("target").toUpperCase()) {
+		case "BRANCH":
+			if (!this.agent.setBranch(request.getLong("id"), request.getJSONObject("branch"))) {
+				response.setStatus(Response.Status.SERVERERROR);
+			}
+			
+			break;
 		case "CONFIG":
 			switch (request.getString("key")) {
 			case "retry": 
@@ -377,7 +362,7 @@ public class NMS implements Serviceable, Listener {
 			case "smtpServer":
 				if (!request.has("value")) {
 					if (this.agent.setSMTP(null)) {
-						this.smtpServer.disable();	
+						this.smtpServer.disable();
 					} else {
 						response.setStatus(Response.Status.SERVERERROR);
 					}
@@ -385,18 +370,16 @@ public class NMS implements Serviceable, Listener {
 					JSONObject smtp = request.getJSONObject("value");
 					
 					if (this.agent.setSMTP(smtp)) {
-						this.smtpServer.enable(smtp.getString("smtpServer"),
-							smtp.getString("smtpProtocol"),
-							smtp.getString("smtpUser"),
-							smtp.getString("smtpPassword"));
-						
-						try {
-							this.smtpServer.send(KR.INFO_SMTP_INIT, smtp.getString("smtpUser"));
-						} catch (MessagingException me) {
+						if (!this.smtpServer.enable(
+							smtp.getString("server"),
+							smtp.getString("protocol"),
+							smtp.getString("user"),
+							smtp.getString("password")
+						)) {
 							response.setStatus(Response.Status.NOTIMPLEMENTED);
 						}
 					} else {
-						response.setStatus(Response.Status.SERVERERROR);
+						response.setStatus(Response.Status.SERVERERROR);	
 					}
 				}
 				
@@ -433,10 +416,8 @@ public class NMS implements Serviceable, Listener {
 			}
 			
 			break;
-		case "PATH":
-			if (!this.agent.setPath(request.getLong("nodeFrom"), request.getLong("nodeTo"), request.getJSONObject("path"))) {
-				response.setStatus(Response.Status.CONFLICT);
-			}
+		case "MEMO":
+			this.agent.setMemo(request.getLong("event"), request.getJSONObject("memo"));
 			
 			break;
 		case "MONITOR":
@@ -448,6 +429,12 @@ public class NMS implements Serviceable, Listener {
 		case "NODE":
 			if (!this.agent.setNode(request.getLong("id"), request.getJSONObject("node"))) {
 				response.setStatus(Response.Status.SERVERERROR);
+			}
+			
+			break;
+		case "PATH":
+			if (!this.agent.setPath(request.getLong("nodeFrom"), request.getLong("nodeTo"), request.getJSONObject("path"))) {
+				response.setStatus(Response.Status.CONFLICT);
 			}
 			
 			break;
@@ -494,6 +481,12 @@ public class NMS implements Serviceable, Listener {
 	
 	private void remove(JSONObject request, Response response) {
 		switch(request.getString("target").toUpperCase()) {
+		case "BRANCH":
+			if (!this.agent.removeBranch(request.getLong("id"))) {
+				response.setStatus(Response.Status.SERVERERROR);
+			}
+			
+			break;
 		case "ICON":
 			if (!this.agent.removeIcon(request.getString("type"))) {
 				response.setStatus(Response.Status.CONFLICT);
@@ -551,6 +544,8 @@ public class NMS implements Serviceable, Listener {
 	
 	private JSONObject get(String target, JSONObject request) {
 		switch(target.toUpperCase()) {
+		case "BRANCH":
+			return request.has("id")? this.agent.getBranch(request.getLong("id")): this.agent.getBranch();
 		case "CONFIG":
 			return this.agent.getConfig();
 		case "CRITICAL":
@@ -591,7 +586,7 @@ public class NMS implements Serviceable, Listener {
 				this.agent.getPath(request.getLong("nodeFrom"), request.getLong("nodeTo")):
 				this.agent.getPath();
 		case "POSITION":
-			return this.agent.getPosition("position");
+			return this.agent.getPosition(request.has("name")? request.getString("name"): "position");
 		case "PROFILE":
 			return this.agent.getProfile();
 		case "RESOURCE":

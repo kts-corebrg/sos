@@ -1,4 +1,4 @@
-package com.itahm.nms;
+package com.itahm.kts;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -22,15 +22,15 @@ import org.snmp4j.smi.OctetString;
 import org.snmp4j.smi.Variable;
 import org.snmp4j.transport.DefaultUdpTransportMapping;
 
+import com.itahm.kts.SeedNode.Arguments;
+import com.itahm.kts.SeedNode.Protocol;
+import com.itahm.nms.NodeEventReceivable;
 import com.itahm.nms.node.Event;
 import com.itahm.nms.node.ICMPNode;
 import com.itahm.nms.node.Node;
 import com.itahm.nms.node.SNMPDefaultNode;
 import com.itahm.nms.node.SNMPV3Node;
-import com.itahm.nms.node.SeedNode;
 import com.itahm.nms.node.TCPNode;
-import com.itahm.nms.node.SeedNode.Arguments;
-import com.itahm.nms.node.SeedNode.Protocol;
 import com.itahm.util.Listener;
 
 public class NodeManager extends Snmp implements Listener, Closeable {
@@ -172,6 +172,10 @@ public class NodeManager extends Snmp implements Listener, Closeable {
 			createNode(id, new TCPNode(id, ip));
 			
 			break;
+		case "KA":
+			createNode(id, new KANode(id, ip));
+			
+			break;
 		}
 	}
 	
@@ -211,7 +215,9 @@ public class NodeManager extends Snmp implements Listener, Closeable {
 	
 	private void onPingEvent(Node node, long rtt) {
 		this.agent.informPingEvent(node.id, rtt,
-			node instanceof ICMPNode? "icmp": node instanceof TCPNode? "tcp": "");
+			node instanceof ICMPNode? "icmp":
+			node instanceof TCPNode? "tcp":
+			node instanceof KANode? "ka": "");
 		
 		node.ping(rtt > -1? this.interval: 0);
 	}
@@ -232,6 +238,14 @@ public class NodeManager extends Snmp implements Listener, Closeable {
 		Node node = this.nodeMap.remove(id);
 		
 		if (node != null) {
+			if (node instanceof KANode) {
+				String key = ((KANode)node).key;
+
+				if (KeepAlive.map.containsKey(key)) {
+					KeepAlive.map.put(key, null);
+				}
+			}
+
 			node.close();
 		}
 	}
@@ -272,6 +286,10 @@ public class NodeManager extends Snmp implements Listener, Closeable {
 			break;
 		case "TCP":
 			seed.test(SeedNode.Protocol.TCP);
+			
+			break;
+		case "KA":
+			seed.test(SeedNode.Protocol.KA);
 			
 			break;
 		default:

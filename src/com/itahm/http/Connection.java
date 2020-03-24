@@ -16,7 +16,7 @@ import java.util.TimerTask;
 public class Connection implements Closeable {
 
 	public enum Header {
-		ORIGIN, COOKIE;
+		ORIGIN, COOKIE, SESSION;
 	};
 	
 	public final static long TIMEOUT_HOUR = 60 *60 *1000;
@@ -204,7 +204,7 @@ public class Connection implements Closeable {
 		Request request;
 		
 		try {			
-			request = new Request(this.channel.getRemoteAddress(), this.startLine, this.header, this.body.toByteArray());
+			request = new Request2(this.channel.getRemoteAddress(), this.startLine, this.header, this.body.toByteArray());
 		} catch (IOException ioe) {
 			ioe.printStackTrace();
 			
@@ -249,6 +249,40 @@ public class Connection implements Closeable {
 			}
 		}
 	}
+	
+	class Request2 extends Request {
+
+		private final String sessionID;
+		
+		public Request2(SocketAddress peer, String startLine, Map<String, String> header, byte[] body) throws IOException {
+			super(peer, startLine, header, body);
+			
+			sessionID = getHeader(Connection.Header.SESSION.toString());
+		}
+		
+		@Override
+		public Session getSession(boolean create) {
+			super.getSession(create);
+			
+			if (super.session == null) {
+				if (this.sessionID != null) {
+					super.session = Session.find(this.sessionID);
+				}
+				
+				if (super.session != null) {
+					super.session.update();
+				}
+			}
+
+			return super.session;
+		}
+		
+		@Override
+		public String getRequestedSessionId() {
+			return super.cookie != null? super.cookie: this.sessionID;
+		}
+	}
+	
 	
 	class Request implements com.itahm.http.Request {
 		private final SocketAddress peer;
